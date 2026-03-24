@@ -44,6 +44,7 @@ class Usage:
 
 @dataclass
 class ToolCall:
+    id: str
     name: str
     args: str
 
@@ -77,7 +78,9 @@ def parse_llm_response(llm_output: ChatCompletion) -> LLMResponse:
                     subtasks.append(
                         SubTask(
                             description="function calls",
-                            tools_args=ToolCall(name=function.function.name, args=function.function.arguments),
+                            tools_args=ToolCall(
+                                id=function.id, name=function.function.name, args=function.function.arguments
+                            ),
                         )
                     )
 
