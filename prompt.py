@@ -6,32 +6,11 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessage, ChatComplet
 COMMON_PROMPT = (
     "你是一个智能旅行助手。你的任务是分析用户的请求，并使用可用工具一步步地解决问题。\n"
     "# 可用工具：\n"
-    "- `get_weather(city: str)`: 查询指定城市的实时天气。\n"
-    "- `get_attraction(city: str, weather: str)`: 根据城市和天气搜索推荐的旅游景点。\n"
-    "# 输出格式要求:\n"
-    "你的每次回复必须严格遵循以下格式:\n"
-    "{\n"
-    '  "subtasks": [\n'
-    "    {\n"
-    '      "description": "Task description",\n'
-    '      "tools_args": {"name": "get_weather","args": {"city": "北京"} },\n'
-    "    }\n"
-    "  ]\n"
-    "}\n\n"
-    "规则：\n"
-    "- subTask: 每个子任务都应该是一个独立的、可执行的步骤，描述需要完成的具体任务。如果当前已经可以回答用户的问题，子任务返回[]\n"
-    "- tools_args: 每个子任务都必须指定一个工具调用，包含工具名称和参数。\n"
-    "例如：\n"
-    "用户输入: 请帮我查询一下今天北京的天气\n"
-    "你的回复:\n"
-    "{\n"
-    '  "subtasks": [\n'
-    "    {\n"
-    '      "description": "查询北京的天气",\n'
-    '      "tools_args": {"name": "get_weather","args": {"city": "北京"} },\n'
-    "    },\n"
-    "  ]\n"
-    "}\n"
+    "- `get_weather`: 查询指定城市的实时天气。\n"
+    "- `get_attraction`: 根据城市和天气搜索推荐的旅游景点。\n"
+    "# 回复要求：\n"
+    "当工具结果已足够回答用户、且你不再需要调用新工具时，必须在 message 正文中用自然语言（中文）\n"
+    "给出完整结论，综合天气与景点建议；禁止仅结束对话而不输出任何可见正文。\n"
 )
 
 
@@ -52,7 +31,8 @@ class ToolCall:
 @dataclass
 class SubTask:
     description: str  # 对子任务的简要描述
-    tools_args: ToolCall  # 需要调用的工具 以及工具所需要的参数 {"tool": "web_search", "query": "Apple stock AAPL trend analysis forecast"}
+    # 工具名与参数（JSON 字符串），与 OpenAI function.arguments 对齐
+    tools_args: ToolCall
 
 
 @dataclass
