@@ -1,11 +1,11 @@
 import asyncio
 import json
-import re
-import time
 
-from open_ai import OpenAICompatibleClient, assistant_tool_message, run_with_tools
+from open_ai_provider import LLMResponse, OpenAICompatibleClient, Usage
 from plan import Planner
-from prompt import COMMON_PROMPT, LLMResponse, Usage
+from plan_solve import PlanAndSolveAgent
+from prompt import COMMON_PROMPT
+from reflection_agent import ReflectionAgent
 from tools import available_tools
 
 
@@ -100,11 +100,23 @@ async def main_async():
 
 async def test_run_with_tools():
     llm = OpenAICompatibleClient(mode="qwen3.5:0.8b", url="127.0.0.1:11434")
-    plan = Planner(llm)
+    # plan = Planner(llm)
 
-    resp = await plan.plan("请帮我查询一下今天北京的天气，然后根据天气推荐一个合适的旅游景点。")
+    # questoin = "一个水果店周一卖出了15个苹果。周二卖出的苹果数量是周一的两倍。周三卖出的数量比周二少了5个。请问这三天总共卖出了多少个苹果？"
 
-    print("规划结果:", resp)
+    # resp = await plan.plan(
+    #     "一个水果店周一卖出了15个苹果。周二卖出的苹果数量是周一的两倍。周三卖出的数量比周二少了5个。请问这三天总共卖出了多少个苹果？"
+    # )
+
+    # resp = await PlanAndSolveAgent(llm).run(questoin)
+
+    # print("规划结果:", resp)
+
+    question = "编写一个Python函数，找出1到n之间所有的素数 (prime numbers)。"
+
+    final_code = await ReflectionAgent(llm).run(question)
+
+    print("最终代码:\n", final_code)
 
 
 if __name__ == "__main__":

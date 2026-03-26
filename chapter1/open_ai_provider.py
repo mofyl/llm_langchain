@@ -91,6 +91,7 @@ class OpenAICompatibleClient:
             "max_tokens": 1000,
             "tools": tools,
             "tool_choice": "auto",
+            "stream": False,
         }
 
         try:

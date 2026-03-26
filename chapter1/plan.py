@@ -1,19 +1,32 @@
 import ast
 import re
+import sys
+from os import system
 from typing import Any
 
-from main import OpenAICompatibleClient
+from open_ai_provider import OpenAICompatibleClient
 
 PLANNER_PROMPT_TEMPLATE = """
+
+# 角色
 你是一个顶级的AI规划专家。你的任务是将用户提出的复杂问题分解成一个由多个简单步骤组成的行动计划。
+
+
+# 要求
 请确保计划中的每个步骤都是一个独立的、可执行的子任务，并且严格按照逻辑顺序排列。
-你的输出必须是一个Python列表，其中每个元素都是一个描述子任务的字符串。
+必须说明每个步骤的具体内容和目的，确保它们共同构成一个完整的解决方案。
+
+一定要将步骤输出为一个 Python 列表，列表中的每个元素都是一个描述子任务的字符串。请勿输出任何除该列表以外的内容。
+并且一定要有输出，禁止空输出。
+
+# 输出格式
+你的输出必须是一个Python列表，其中每个元素都是一个描述子任务的字符串。只需要一个列表，禁止输出任何额外的文本、解释或格式。
 
 问题: {question}
 
 请严格按照以下格式输出你的计划,```python与```作为前后缀是必要的:
 ```python
-["步骤1", "步骤2", "步骤3", ...]
+["步骤1:内容+目的", "步骤2:内容+目的", "步骤3:内容+目的", ...]
 ```
 """
 
@@ -25,13 +38,25 @@ class Planner:
     async def plan(self, question: str) -> list[str]:
         prompt = PLANNER_PROMPT_TEMPLATE.format(question=question)
         messages = [{"role": "user", "content": prompt}]
-        _, raw_content = await self.llm_client.generate(messages)
+        _, raw_content = await self.llm_client.generate(messages, system_prompt=PLANNER_PROMPT_TEMPLATE)
         if not raw_content:
             return []
 
         steps = self._parse_steps(raw_content)
         print("LLM 规划输出:", steps)
-        return steps
+
+        try:
+            plan_str = raw_content.split("```python")[1].split("```")[0].strip()
+            plan = ast.literal_eval(plan_str)
+
+            return plan if isinstance(plan, list) else []
+        except (IndexError, ValueError, SyntaxError) as e:
+            print(f"解析规划输出失败: {e}")
+            print("原始输出:", raw_content)
+            return []
+        except Exception as e:
+            print(f"未知错误: {e}")
+            return []
 
     @staticmethod
     def _parse_steps(raw_content: str) -> list[str]:
@@ -48,32 +73,3 @@ class Planner:
             return []
 
         return [str(item) for item in parsed if str(item).strip()]
-
-
-class FakeLLMClient:
-    async def generate(self, messages: list[dict[str, Any]]) -> tuple[Any, str]:
-        _ = messages
-        return (
-            None,
-            """```python
-["查询北京天气", "根据天气筛选景点", "给出推荐理由"]
-```""",
-        )
-
-
-async def test_planner_with_mock() -> None:
-    planner = Planner(FakeLLMClient())
-    question = "请帮我查询一下今天北京的天气，然后根据天气推荐一个合适的旅游景点。"
-    plan = await planner.plan(question)
-
-    assert plan == ["查询北京天气", "根据天气筛选景点", "给出推荐理由"]
-    print("test_planner_with_mock 通过")
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    async def main():
-        await test_planner_with_mock()
-
-    asyncio.run(main())
