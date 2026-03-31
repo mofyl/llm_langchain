@@ -8,9 +8,25 @@ from openai import BaseModel
 
 
 class MemoryType(str, enum.Enum):
-    WORKINGMEMORY = "Working"
-    LONGTERMMEMORY = "LongTerm"
-    SENSORYMEMORY = "Sensory"
+    WORKINGMEMORY = "working"
+    LONGTERMMEMORY = "long_term"
+    SENSORYMEMORY = "sensory"
+
+
+@dataclass
+class MemoriesState:
+    count: int
+    forgotten_count: int
+    total_count: int
+    current_tokens: int
+    max_cap: int
+    max_tokens: int
+    max_age_min: int
+    session_duration_min: int
+    avg_importance: float
+    cap_usage: float
+    token_usage: float
+    memory_type: MemoryType
 
 
 @dataclass
@@ -119,7 +135,7 @@ class BaseMemoroy(ABC):
         pass
 
     @abstractmethod
-    def get_stats(self) -> dict[str, Any]:
+    def get_stats(self) -> MemoriesState:
         """获取记忆统计信息
 
         Returns:
