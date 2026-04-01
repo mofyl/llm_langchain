@@ -2,9 +2,9 @@ import inspect
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import get_type_hints
+from typing import Any, get_type_hints
 
-from openai import BaseModel
+from pydantic import BaseModel
 
 
 def tool_action(name: str = None, description: str = None):
@@ -42,7 +42,7 @@ class ToolParameter(BaseModel):
     type: str
     description: str
     required: bool = True
-    default: any = None
+    default: Any = None
 
 
 class Tool(ABC):
@@ -63,7 +63,7 @@ class Tool(ABC):
         self.expandable = expandable
 
     @abstractmethod
-    def run(self, param: dict[str, any]) -> str:
+    def run(self, param: dict[str, Any]) -> str:
         pass
 
     @abstractmethod
@@ -92,7 +92,7 @@ class Tool(ABC):
 
         return tools if tools else None
 
-    def validate_parameters(self, parameters: dict[str, any]) -> bool:
+    def validate_parameters(self, parameters: dict[str, Any]) -> bool:
         required_params = [p.name for p in self.get_parameters() if p.required]
         return all(param in parameters for param in required_params)
 

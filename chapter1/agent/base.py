@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 
-from config import Config
-from message import Message
-from open_ai_provider import OpenAICompatibleClient
+from ..config import Config
+from ..message import Message
+from ..open_ai_provider import OpenAICompatibleClient
 
 
 class Agent(ABC):

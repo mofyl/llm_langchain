@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -9,7 +10,7 @@ class Config(BaseModel):
 
     temperature: float = 0.7
 
-    max_token: int | None
+    max_token: int | None = None
 
     debug: bool = False
 
@@ -21,8 +22,8 @@ class Config(BaseModel):
             debug=os.getenv("DEBUG", "false").lower() == "true",
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             temperature=float(os.getenv("TEMPERATURE", "0.7")),
-            max_tokens=int(os.getenv("MAX_TOKENS")) if os.getenv("MAX_TOKENS") else None,
+            max_token=int(os.getenv("MAX_TOKENS")) if os.getenv("MAX_TOKENS") else None,
         )
 
-    def to_dict(self) -> dict[str, any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

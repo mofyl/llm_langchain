@@ -1,10 +1,10 @@
-import datetime
 import enum
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-from attr import dataclass
-from openai import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MemoryType(str, enum.Enum):
@@ -29,7 +29,6 @@ class MemoriesState:
     memory_type: MemoryType
 
 
-@dataclass
 class MemoryItem(BaseModel):
     id: str
     content: str
@@ -38,13 +37,12 @@ class MemoryItem(BaseModel):
     session_id: str
     timestamp: datetime
     importance: float = 0.5
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         arbitrary_types_allowed = True
 
 
-@dataclass
 class MemoryConfig(BaseModel):
     stroage_path: str = "./memory_data"
 

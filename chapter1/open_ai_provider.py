@@ -1,10 +1,11 @@
 import json
 import time
+from dataclasses import dataclass
 
-from attr import dataclass
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageFunctionToolCall
-from tools import tools
+
+from .tools import tools
 
 
 @dataclass
@@ -78,7 +79,7 @@ class OpenAICompatibleClient:
         self.url = url
         self.client = AsyncOpenAI(api_key="ollama", timeout=60, base_url=f"http://{url}/v1")
 
-    async def generate(self, messages: list[dict], system_prompt: str) -> tuple[LLMResponse, str | None]:
+    async def generate(self, messages: list[dict], system_prompt: str, **kwargs) -> tuple[LLMResponse, str | None]:
         date_prefix = f"The current date is {self.current_time}\n"
         system_prompt = date_prefix + system_prompt
         # 系统提示只放开头一轮，避免多轮工具调用重复堆叠
@@ -89,9 +90,9 @@ class OpenAICompatibleClient:
             "model": self.mode,
             "messages": payload,
             "max_tokens": 1000,
-            "tools": tools,
+            # "tools": tools,
             "tool_choice": "auto",
-            "stream": False,
+            **{k: v for k, v in kwargs.items() if k not in ["model", "messages", "max_tokens", "tool_choice"]},
         }
 
         try:

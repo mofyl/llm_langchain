@@ -1,8 +1,10 @@
 import datetime
+from typing import Any
 
-from ..memory import MemoryConfig, MemoryType
-from ..memory.manager import MemoryManager
-from .base import Tool, tool_action
+from memory import MemoryConfig, MemoryType
+from memory.manager import MemoryManager
+
+from .base import Tool, ToolParameter, tool_action
 
 
 class MemoryTool(Tool):
@@ -10,13 +12,15 @@ class MemoryTool(Tool):
         self,
         user_id: str = "default_user",
         memory_config: MemoryConfig = None,
+        memory_type: list[MemoryType] = None,
         memoty_type: list[MemoryType] = None,
         expandable: bool = False,
     ):
         super().__init__(name="memory", desc="记忆工具 - 可以存储和检索对话历史、知识和经验", expandable=expandable)
 
         self.memory_config = memory_config or MemoryConfig()
-        self.memory_types = memoty_type or [MemoryType.WORKINGMEMORY]
+        selected_memory_types = memory_type if memory_type is not None else memoty_type
+        self.memory_types = selected_memory_types or [MemoryType.WORKINGMEMORY]
 
         self.memory_manager = MemoryManager(
             config=self.memory_config,
@@ -30,7 +34,7 @@ class MemoryTool(Tool):
         self.current_session_id = None
         self.conversation_count = 0
 
-    def run(self, parameters: dict[str, any]) -> str:
+    def run(self, parameters: dict[str, Any]) -> str:
         if not self.validate_parameters(parameters=parameters):
             return "参数验证失败"
 
@@ -44,7 +48,101 @@ class MemoryTool(Tool):
                 file_path=parameters.get("file_path"),
                 modality=parameters.get("modality"),
             )
-        # if action == "search" :
+        if action == "search":
+            return self._search_memory(
+                query=parameters.get("query"),
+                limit=parameters.get("limit", 5),
+                memory_type=parameters.get("memory_type"),
+                min_importance=parameters.get("min_importance", 0.1),
+            )
+
+    def get_parameters(self) -> list[ToolParameter]:
+        return [
+            ToolParameter(
+                name="action",
+                type="string",
+                desc=(
+                    "要执行的操作："
+                    "add(添加记忆), search(搜索记忆), summary(获取摘要), stats(获取统计), "
+                    "update(更新记忆), remove(删除记忆), forget(遗忘记忆), consolidate(整合记忆), clear_all(清空所有记忆)"
+                ),
+                required=True,
+            ),
+            ToolParameter(
+                name="content",
+                type="string",
+                description="记忆内容（add/update时可用；感知记忆可作描述）",
+                required=False,
+            ),
+            ToolParameter(name="query", type="string", description="搜索查询（search时可用）", required=False),
+            ToolParameter(
+                name="memory_type",
+                type="string",
+                description="记忆类型：working, episodic, semantic, perceptual（默认：working）",
+                required=False,
+                default="working",
+            ),
+            ToolParameter(
+                name="importance", type="number", description="重要性分数，0.0-1.0（add/update时可用）", required=False
+            ),
+            ToolParameter(
+                name="limit", type="integer", description="搜索结果数量限制（默认：5）", required=False, default=5
+            ),
+            ToolParameter(
+                name="memory_id", type="string", description="目标记忆ID（update/remove时必需）", required=False
+            ),
+            ToolParameter(
+                name="file_path", type="string", description="感知记忆：本地文件路径（image/audio）", required=False
+            ),
+            ToolParameter(
+                name="modality",
+                type="string",
+                description="感知记忆模态：text/image/audio（不传则按扩展名推断）",
+                required=False,
+            ),
+            ToolParameter(
+                name="strategy",
+                type="string",
+                description="遗忘策略：importance_based/time_based/capacity_based（forget时可用）",
+                required=False,
+                default="importance_based",
+            ),
+            ToolParameter(
+                name="threshold",
+                type="number",
+                description="遗忘阈值（forget时可用，默认0.1）",
+                required=False,
+                default=0.1,
+            ),
+            ToolParameter(
+                name="max_age_days",
+                type="integer",
+                description="最大保留天数（forget策略为time_based时可用）",
+                required=False,
+                default=30,
+            ),
+            ToolParameter(
+                name="from_type",
+                type="string",
+                description="整合来源类型（consolidate时可用，默认working）",
+                required=False,
+                default="working",
+            ),
+            ToolParameter(
+                name="to_type",
+                type="string",
+                description="整合目标类型（consolidate时可用，默认episodic）",
+                required=False,
+                default="episodic",
+            ),
+            ToolParameter(
+                name="importance_threshold",
+                type="number",
+                description="整合重要性阈值（默认0.7）",
+                required=False,
+                default=0.7,
+            ),
+        ]
 
     @tool_action("memory_add", "添加新的记忆到记忆系统中")
     def _add_memory(
@@ -108,3 +206,32 @@ class MemoryTool(Tool):
         Returns:
             搜索结果
         """
+        try:
+            memory_type = [memory_type] if memory_type else None
+
+            result = self.memory_manager.retrieve_memories(query=query, limit=limit, memory_types=self.memory_types)
+
+            if not result:
+                return f"未找到与 '{query}' 相关的记忆"
+
+            formatted_results = []
+
+            formatted_results.append(f"找到 {len(result)} 条相关记忆")
+
+            for i, memory in enumerate(result, 1):
+                memory_type_label = {
+                    "working": "工作记忆",
+                    "episodic": "情景记忆",
+                    "semantic": "语义记忆",
+                    "perceptual": "感知记忆",
+                }.get(memory.memory_type, memory.memory_type)
+
+                content_preview = memory.content[:80] + "..." if len(memory.content) > 80 else memory.content
+                formatted_results.append(
+                    f"{i}. [{memory_type_label}] {content_preview} (重要性: {memory.importance:.2f})"
+                )
+
+            return "\n".join(formatted_results)
+
+        except Exception as e:
+            return f"搜索记忆失败: {str(e)}"
