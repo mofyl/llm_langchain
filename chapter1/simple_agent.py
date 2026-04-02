@@ -82,11 +82,15 @@ class SimpleAgent(Agent):
         final_response = ""
 
         while current_iteration < max_tool_iterations:
+            print("输入模型：", message)
             _, resp = await self.llm.generate(messages=message, system_prompt=enhanced_system_prompt, **kwargs)
-
+            print("模型输出：", resp)
+            if resp is None:
+                return final_response
             tool_calls = self._parse_tool_calls(resp)
 
             if tool_calls:
+                print(f"tools call {tool_calls}")
                 tool_result = []
 
                 clean_response = resp
@@ -148,7 +152,7 @@ class SimpleAgent(Agent):
             if not tool:
                 return f"未能找到工具{tool_name}"
 
-            param_dict = self._parse_tool_parameters()
+            param_dict = self._parse_tool_parameters(parameters=parameters)
             result = tool.run(param_dict)
 
             return f"工具 {tool_name} 执行结果为：\n{result}"

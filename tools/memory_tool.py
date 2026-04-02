@@ -55,13 +55,15 @@ class MemoryTool(Tool):
                 memory_type=parameters.get("memory_type"),
                 min_importance=parameters.get("min_importance", 0.1),
             )
+        if action == "summary":
+            return self._get_summary(limit=parameters.get("limit", 10))
 
     def get_parameters(self) -> list[ToolParameter]:
         return [
             ToolParameter(
                 name="action",
                 type="string",
-                desc=(
+                description=(
                     "要执行的操作："
                     "add(添加记忆), search(搜索记忆), summary(获取摘要), stats(获取统计), "
                     "update(更新记忆), remove(删除记忆), forget(遗忘记忆), consolidate(整合记忆), clear_all(清空所有记忆)"
@@ -235,3 +237,79 @@ class MemoryTool(Tool):
 
         except Exception as e:
             return f"搜索记忆失败: {str(e)}"
+
+    @tool_action("memory_summary", "获取记忆系统摘要（包含重要记忆和统计信息）")
+    def _get_summary(self, limit: int = 10) -> str:
+        """获取记忆摘要
+
+        Args:
+            limit: 显示的重要记忆数量
+
+        Returns:
+            记忆摘要
+        """
+        try:
+            stats = self.memory_manager.get_memory_stats()
+
+            summary_parts = [
+                "📊 记忆系统摘要",
+                f"总记忆数: {stats['total_memories']}",
+                f"当前会话: {self.current_session_id or '未开始'}",
+                f"对话轮次: {self.conversation_count}",
+            ]
+
+            # 各类型记忆统计
+            if stats["memories_by_type"]:
+                summary_parts.append("\n📋 记忆类型分布:")
+                for memory_type, type_stats in stats["memories_by_type"].items():
+                    count = type_stats.get("count", 0)
+                    avg_importance = type_stats.get("avg_importance", 0)
+                    type_label = {
+                        "working": "工作记忆",
+                        "episodic": "情景记忆",
+                        "semantic": "语义记忆",
+                        "perceptual": "感知记忆",
+                    }.get(memory_type, memory_type)
+
+                    summary_parts.append(f"  • {type_label}: {count} 条 (平均重要性: {avg_importance:.2f})")
+
+            # 获取重要记忆 - 修复重复问题
+            important_memories = self.memory_manager.retrieve_memories(
+                query="",
+                memory_types=None,  # 从所有类型中检索
+                limit=limit * 3,  # 获取更多候选，然后去重
+                min_importance=0.5,  # 降低阈值以获取更多记忆
+            )
+
+            if important_memories:
+                # 去重：使用记忆ID和内容双重去重
+                seen_ids = set()
+                seen_contents = set()
+                unique_memories = []
+
+                for memory in important_memories:
+                    # 使用ID去重
+                    if memory.id in seen_ids:
+                        continue
+
+                    # 使用内容去重（防止相同内容的不同记忆）
+                    content_key = memory.content.strip().lower()
+                    if content_key in seen_contents:
+                        continue
+
+                    seen_ids.add(memory.id)
+                    seen_contents.add(content_key)
+                    unique_memories.append(memory)
+
+                # 按重要性排序
+                unique_memories.sort(key=lambda x: x.importance, reverse=True)
+                summary_parts.append(f"\n⭐ 重要记忆 (前{min(limit, len(unique_memories))}条):")
+
+                for i, memory in enumerate(unique_memories[:limit], 1):
+                    content_preview = memory.content[:60] + "..." if len(memory.content) > 60 else memory.content
+                    summary_parts.append(f"  {i}. {content_preview} (重要性: {memory.importance:.2f})")
+
+            return "\n".join(summary_parts)
+
+        except Exception as e:
+            return f"❌ 获取摘要失败: {str(e)}"

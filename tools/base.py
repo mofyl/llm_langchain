@@ -93,6 +93,7 @@ class Tool(ABC):
         return tools if tools else None
 
     def validate_parameters(self, parameters: dict[str, Any]) -> bool:
+        print("validate param ", self.get_parameters())
         required_params = [p.name for p in self.get_parameters() if p.required]
         return all(param in parameters for param in required_params)
 

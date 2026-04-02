@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from itertools import count
 from typing import Any
 
-from ..base import BaseMemoroy, MemoriesState, MemoryConfig, MemoryItem, MemoryType
+from ..base import BaseMemoroy, MemoryConfig, MemoryItem, MemoryType
 
 
 class WorkingMemory(BaseMemoroy):
@@ -171,28 +171,27 @@ class WorkingMemory(BaseMemoroy):
         self.current_tokens = 0
 
     # MemoriesState
-    def get_stats(self) -> MemoriesState:
+    def get_stats(self) -> dict[str, Any]:
 
         self._expire_old_memories()
 
         active_memories = self.memories
-        m = MemoriesState(
-            count=len(active_memories),
-            forgotten_count=0,
-            total_count=len(self.memories),
-            current_tokens=self.current_tokens,
-            max_cap=self.max_cap,
-            max_tokens=self.max_tokens,
-            max_age_min=self.max_age_min,
-            session_duration_min=(datetime.now() - self.session_start).total_seconds() / 60,
-            avg_importance=sum(m.importance for m in active_memories) / len(active_memories)
+        return {
+            "count": len(active_memories),
+            "forgotten_count": 0,
+            "total_count": len(self.memories),
+            "current_tokens": self.current_tokens,
+            "max_cap": self.max_cap,
+            "max_tokens": self.max_tokens,
+            "max_age_min": self.max_age_min,
+            "session_duration_min": (datetime.now() - self.session_start).total_seconds() / 60,
+            "avg_importance": sum(m.importance for m in active_memories) / len(active_memories)
             if active_memories
             else 0.0,
-            cap_usage=len(active_memories) / self.max_cap if self.max_cap > 0 else 0.0,
-            token_usage=self.current_tokens / self.max_tokens if self.max_tokens > 0 else 0.0,
-            memory_type=MemoryType.WORKINGMEMORY,
-        )
-        return m
+            "cap_usage": len(active_memories) / self.max_cap if self.max_cap > 0 else 0.0,
+            "token_usage": self.current_tokens / self.max_tokens if self.max_tokens > 0 else 0.0,
+            "memory_type": MemoryType.WORKINGMEMORY,
+        }
 
     def get_recent(self, limit: int = 10) -> list[MemoryItem]:
         sorted_memories = sorted(self.memories, key=lambda x: x.timestamp, reverse=True)

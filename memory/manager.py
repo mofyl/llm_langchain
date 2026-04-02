@@ -120,3 +120,25 @@ class MemoryManager:
 
         all_result.sort(key=lambda x: x.importance, reverse=True)
         return all_result[:limit]
+
+    def get_memory_stats(self) -> dict[str, Any]:
+        """获取记忆统计信息"""
+        stats = {
+            "user_id": self.user_id,
+            "enable_types": list(self.memory_types.keys()),
+            "total_memories": 0,
+            "memories_by_type": {},
+            "config": {
+                "max_capacity": self.config.max_cap,
+                "importance_threshold": self.config.importance_threshold,
+                "decay_factor": self.config.decay_factor,
+            },
+        }
+
+        for memory_type, memory_instance in self.memory_types.items():
+            print("memory_type , memory_instance ", memory_type)
+            type_stats = memory_instance.get_stats()
+            stats["memories_by_type"][memory_type] = type_stats
+            stats["total_memories"] += type_stats.get("count", 0)
+
+        return stats

@@ -94,7 +94,7 @@ class OpenAICompatibleClient:
             "tool_choice": "auto",
             **{k: v for k, v in kwargs.items() if k not in ["model", "messages", "max_tokens", "tool_choice"]},
         }
-
+        print("发送至模型")
         try:
             response = await self.client.chat.completions.create(**api_request)
             llm_response = parse_llm_response(response)
