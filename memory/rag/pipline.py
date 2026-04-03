@@ -1,5 +1,7 @@
 from types import Any
 
+from ..embedding import get_dimension, get_text_embedder
+
 
 def create_rag_pipeline(
     qdrant_url: str | None = None,
@@ -13,3 +15,6 @@ def create_rag_pipeline(
     Returns:
         Dict containing store, namespace, and helper functions
     """
+    dimension = get_dimension(384)
+
+    store = 

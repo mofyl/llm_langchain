@@ -1,4 +1,5 @@
 {
     "python.terminal.useEnvFile": true,
-    "python.envFile": "${workspaceFolder}/.env"  // 确保路径正确
+    "python.analysis.autoFormatStrings": true,
+    "python.envFile": "${workspaceFolder}/.env" // 确保路径正确
 }
