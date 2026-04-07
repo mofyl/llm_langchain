@@ -1,6 +1,7 @@
 import logging
 import threading
 import uuid
+from ast import Nonlocal
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +16,7 @@ from qdrant_client.http.models import (
     SearchRequest,
     VectorParams,
 )
+from requests import api
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,41 @@ class QdrantConnectionManager:
 
     _instances = {}
     _lock = threading.Lock()
+
+    @classmethod
+    def get_instance(
+        cls,
+        url: str = None | None,
+        api_key: str = None | None,
+        collection_name: str = "hello_agents_vectors",
+        vector_size: int = 384,
+        distance: str = "cosine",
+        timeout: int = 30,
+        **kwargs,
+    ) -> "QdrantVectorStore":
+        """获取或创建Qdrant实例（单例模式）"""
+
+        key = (url or "local", collection_name)
+
+        if key not in cls._instances:
+            with cls._lock:
+                if key not in cls._instances:
+                    logger.debug(f"🔄 创建新的Qdrant连接: {collection_name}")
+                    cls._instances[key] = QdrantVectorStore(
+                        url=url,
+                        api_key=api_key,
+                        collectoin_name=collection_name,
+                        vector_size=vector_size,
+                        distance=distance,
+                        timeout=timeout,
+                        kwargs=kwargs,
+                    )
+                else:
+                    logger.debug(f"♻️ 复用现有Qdrant连接: {collection_name}")
+        else:
+            logger.debug(f"♻️ 复用现有Qdrant连接: {collection_name}")
+
+        return cls._instances[key]
 
 
 class QdrantVectorStore:
