@@ -1,8 +1,10 @@
 import hashlib
 import os
+from ast import Nonlocal
 from types import Any
 from typing import Optional
 
+from attr.validators import get_disabled
 from sympy import EX
 
 from memory.storage.qdrant_store import QdrantVectorStore
@@ -230,9 +232,50 @@ def load_and_chunk_texts(
         # jiang
         para = _split_paragraphs_with_headings(markdown_text)
 
-        toek_chunks = _chunk_pargaraphs(
+        token_chunks = _chunk_pargaraphs(
             paragraphs=para, chunk_tokens=max(1, chunk_size), overlap_tokens=max(0, chunk_overlap)
         )
+
+        for ch in token_chunks:
+            content: str = ch["content"]
+            start = ch.get("start", 0)
+            end = ch.get("end", 0)
+            norm = content.strip()
+
+            if not norm:
+                continue
+
+            content_hash = hashlib.md5(norm.encode("utf-8")).hexdigest()
+
+            if content_hash in seen_hashes:
+                continue
+
+            seen_hashes.add(content_hash)
+
+            chunk_id = hashlib.md5(f"{doc_id}|{start}|{end}|{content_hash}".encode()).hexdigest()
+
+            chunks.append(
+                {
+                    "id": chunk_id,
+                    "content": content,
+                    "metadata": {
+                        "source_path": path,
+                        "file_ext": ext,
+                        "doc_id": doc_id,
+                        "lang": lang,
+                        "start": start,
+                        "end": end,
+                        "content_hash": content_hash,
+                        "namespace": namespace or "default",
+                        "source": source_label,
+                        "external": True,
+                        "heading_path": ch.get("heading_path"),
+                        "format": "markdown",
+                    },
+                }
+            )
+    print(f"[RAG] Universal loader done: total_chunks={len(chunks)}")
+    return chunks
 
 
 def _convert_to_markdown(path: str) -> str:
@@ -258,6 +301,75 @@ def _convert_to_markdown(path: str) -> str:
         return _fallback_text_reader(path)
 
 
+def _create_default_vector_store(dimension: int = None) -> QdrantVectorStore:
+
+    if dimension is None:
+        dimension = get_dimension(384)
+
+    qdrant_url = os.getenv("QDRANT_URL")
+    qdrant_api_key = os.getenv("QDRANT_API_KEY")
+
+    # 使用连接管理器
+    from ..storage.qdrant_store import QdrantConnectionManager
+
+    return QdrantConnectionManager.get_instance(
+        url=qdrant_url,
+        api_key=qdrant_api_key,
+        collection_name="hello_agents_rag_vectors",
+        vector_size=dimension,
+        distance="cosine",
+    )
+
+
+def _preprocess_markdown_for_embedding(text: str) -> str:
+    """
+    Preprocess markdown text for better embedding quality.
+    Removes excessive markup while preserving semantic content.
+    """
+    import re
+
+    # Remove markdown headers symbols but keep the text
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+
+    # Remove markdown links but keep the text
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+    # Remove markdown emphasis markers
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)  # bold
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)  # italic
+    text = re.sub(r"`([^`]+)`", r"\1", text)  # inline code
+
+    # Remove markdown code blocks but keep content
+    text = re.sub(r"```[^\n]*\n([\s\S]*?)```", r"\1", text)
+
+    # Remove excessive whitespace
+    text = re.sub(r"\n\s*\n", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+
+    return text.strip()
+
+
+def index_chunks(
+    store=None, chunks: list[dict] = None, cache_db: str = None, batch_size: int = 64, rag_namespace: str = "default"
+):
+    if not chunks:
+        return
+
+    embedder = get_text_embedder()
+    dimension = get_dimension(384)
+
+    if store is None:
+        store = _create_default_vector_store(dimension=dimension)
+
+    processed_texts = []
+
+    for c in chunks:
+        raw_content = c["content"]
+
+        processed_content = _preprocess_markdown_for_embedding(raw_content)
+        processed_texts.append(processed_content)
+
+
 def create_rag_pipeline(
     qdrant_url: str | None = None,
     qdrant_api_key: str | None = None,
@@ -280,7 +392,7 @@ def create_rag_pipeline(
         distance="cosine",
     )
 
-    def add_document(file_path: list[str], chunk_size: int = 800, chunk_overlap: int = 100):
+    def add_documents(file_path: list[str], chunk_size: int = 800, chunk_overlap: int = 100):
         chunks = load_and_chunk_texts(
             paths=file_path,
             chunk_size=chunk_size,
