@@ -3,6 +3,7 @@ import threading
 import uuid
 from ast import Nonlocal
 from datetime import datetime
+from re import L
 from typing import Any
 
 from qdrant_client import QdrantClient
@@ -365,6 +366,41 @@ class QdrantVectorStore:
         except Exception as e:
             logger.error(f"❌ 删除向量失败: {e}")
             return False
+
+    def get_collection_info(self) -> dict[str, Any]:
+        """
+        获取集合信息
+
+        Returns:
+            Dict: 集合信息
+        """
+        try:
+            collection_info = self.client.get_collection(self.collection_name)
+
+            info = {
+                "name": self.collection_name,
+                "vectors_count": collection_info.vectors_count,
+                "indexed_vectors_count": collection_info.indexed_vectors_count,
+                "points_count": collection_info.points_count,
+                "segments_count": collection_info.segments_count,
+                "config": {"vector_size": self.vector_size, "distance": self.distance.value},
+            }
+            return info
+
+        except Exception as e:
+            logger.error(f"❌ 获取集合信息失败: {e}")
+            return {}
+
+    def get_collection_stats(self) -> dict[str, Any]:
+        """
+        获取集合统计信息（兼容抽象接口）
+        """
+        info = self.get_collection_info()
+
+        if not info:
+            return {"store_type": "qdrant", "name": self.collection_name}
+        info["store_type"] = "qdrant"
+        return info
 
     def __del__(self):
         """析构函数，清理资源"""

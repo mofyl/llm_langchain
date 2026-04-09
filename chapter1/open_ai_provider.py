@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from dataclasses import dataclass
 
@@ -74,7 +75,9 @@ def parse_llm_response(llm_output: ChatCompletion) -> LLMResponse:
 class OpenAICompatibleClient:
     current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-    def __init__(self, mode: str, url: str):
+    def __init__(self, mode: str):
+
+        url = os.getenv("OLLAMA_URL")
         self.mode = mode
         self.url = url
         self.client = AsyncOpenAI(api_key="ollama", timeout=60, base_url=f"http://{url}/v1")

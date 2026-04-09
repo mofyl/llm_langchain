@@ -5,8 +5,10 @@ from types import Any
 from typing import Optional
 
 from attr.validators import get_disabled
-from sympy import EX
+from ollama import embed
+from sympy import EX, limit
 
+from chapter1.open_ai_provider import OpenAICompatibleClient
 from memory.storage.qdrant_store import QdrantVectorStore
 
 from ..embedding import get_dimension, get_text_embedder
@@ -350,24 +352,332 @@ def _preprocess_markdown_for_embedding(text: str) -> str:
 
 
 def index_chunks(
-    store=None, chunks: list[dict] = None, cache_db: str = None, batch_size: int = 64, rag_namespace: str = "default"
-):
+    store=None,
+    chunks: list[dict] = None,
+    cache_db: str | None = None,
+    batch_size: int = 64,
+    rag_namespace: str = "default",
+) -> None:
+    """
+    Index markdown chunks with unified embedding and Qdrant storage.
+    Uses百炼 API with fallback to sentence-transformers.
+    """
     if not chunks:
+        print("[RAG] No chunks to index")
         return
 
+    # Use unified embedding from embedding module
     embedder = get_text_embedder()
     dimension = get_dimension(384)
 
+    # Create default Qdrant store if not provided
     if store is None:
-        store = _create_default_vector_store(dimension=dimension)
+        store = _create_default_vector_store(dimension)
+        print(f"[RAG] Created default Qdrant store with dimension {dimension}")
 
+    # Preprocess markdown texts for better embeddings
     processed_texts = []
-
     for c in chunks:
         raw_content = c["content"]
-
         processed_content = _preprocess_markdown_for_embedding(raw_content)
         processed_texts.append(processed_content)
+
+    print(f"[RAG] Embedding start: total_texts={len(processed_texts)} batch_size={batch_size}")
+
+    # Batch encoding with unified embedder
+    vecs: list[list[float]] = []
+    for i in range(0, len(processed_texts), batch_size):
+        part = processed_texts[i : i + batch_size]
+        try:
+            # Use unified embedder directly (handles caching internally)
+            part_vecs = embedder.encode(part)
+
+            # Normalize to List[List[float]]
+            if not isinstance(part_vecs, list):
+                # 单个numpy数组转为列表中的列表
+                if hasattr(part_vecs, "tolist"):
+                    part_vecs = [part_vecs.tolist()]
+                else:
+                    part_vecs = [list(part_vecs)]
+            else:
+                # 检查是否是嵌套列表
+                if part_vecs and not isinstance(part_vecs[0], (list, tuple)) and hasattr(part_vecs[0], "__len__"):
+                    # numpy数组列表 -> 转换每个数组
+                    normalized_vecs = []
+                    for v in part_vecs:
+                        if hasattr(v, "tolist"):
+                            normalized_vecs.append(v.tolist())
+                        else:
+                            normalized_vecs.append(list(v))
+                    part_vecs = normalized_vecs
+                elif part_vecs and not isinstance(part_vecs[0], (list, tuple)):
+                    # 单个向量被误判为列表，实际应该包装成[[...]]
+                    if hasattr(part_vecs, "tolist"):
+                        part_vecs = [part_vecs.tolist()]
+                    else:
+                        part_vecs = [list(part_vecs)]
+
+            for v in part_vecs:
+                try:
+                    # 确保向量是float列表
+                    if hasattr(v, "tolist"):
+                        v = v.tolist()
+                    v_norm = [float(x) for x in v]
+                    if len(v_norm) != dimension:
+                        print(f"[WARNING] 向量维度异常: 期望{dimension}, 实际{len(v_norm)}")
+                        # 用零向量填充或截断
+                        if len(v_norm) < dimension:
+                            v_norm.extend([0.0] * (dimension - len(v_norm)))
+                        else:
+                            v_norm = v_norm[:dimension]
+                    vecs.append(v_norm)
+                except Exception as e:
+                    print(f"[WARNING] 向量转换失败: {e}, 使用零向量")
+                    vecs.append([0.0] * dimension)
+
+        except Exception as e:
+            print(f"[WARNING] Batch {i} encoding failed: {e}")
+            print(f"[RAG] Retrying batch {i} with smaller chunks...")
+
+            # 尝试重试：将批次分解为更小的块
+            success = False
+            for j in range(0, len(part), 8):  # 更小的批次
+                small_part = part[j : j + 8]
+                try:
+                    import time
+
+                    time.sleep(2)  # 等待2秒避免频率限制
+
+                    small_vecs = embedder.encode(small_part)
+                    # Normalize to List[List[float]]
+                    if isinstance(small_vecs, list) and small_vecs and not isinstance(small_vecs[0], list):
+                        small_vecs = [small_vecs]
+
+                    for v in small_vecs:
+                        if hasattr(v, "tolist"):
+                            v = v.tolist()
+                        try:
+                            v_norm = [float(x) for x in v]
+                            if len(v_norm) != dimension:
+                                print(f"[WARNING] 向量维度异常: 期望{dimension}, 实际{len(v_norm)}")
+                                if len(v_norm) < dimension:
+                                    v_norm.extend([0.0] * (dimension - len(v_norm)))
+                                else:
+                                    v_norm = v_norm[:dimension]
+                            vecs.append(v_norm)
+                            success = True
+                        except Exception as e2:
+                            print(f"[WARNING] 小批次向量转换失败: {e2}")
+                            vecs.append([0.0] * dimension)
+                except Exception as e2:
+                    print(f"[WARNING] 小批次 {j // 8} 仍然失败: {e2}")
+                    # 为这个小批次创建零向量
+                    for _ in range(len(small_part)):
+                        vecs.append([0.0] * dimension)
+
+            if not success:
+                print(f"[ERROR] 批次 {i} 完全失败，使用零向量")
+
+        print(f"[RAG] Embedding progress: {min(i + batch_size, len(processed_texts))}/{len(processed_texts)}")
+
+    # Prepare metadata with RAG tags
+    metas: list[dict] = []
+    ids: list[str] = []
+    for ch in chunks:
+        meta = {
+            "memory_id": ch["id"],
+            "user_id": "rag_user",
+            "memory_type": "rag_chunk",
+            "content": ch["content"],  # Keep original markdown content
+            "data_source": "rag_pipeline",  # RAG identification tag
+            "rag_namespace": rag_namespace,
+            "is_rag_data": True,  # Clear RAG data marker
+        }
+        # Merge chunk metadata
+        meta.update(ch.get("metadata", {}))
+        metas.append(meta)
+        ids.append(ch["id"])
+
+    print(f"[RAG] Qdrant upsert start: n={len(vecs)}")
+    success = store.add_vectors(vectors=vecs, metadata=metas, ids=ids)
+    if success:
+        print(f"[RAG] Qdrant upsert done: {len(vecs)} vectors indexed")
+    else:
+        print("[RAG] Qdrant upsert failed")
+        raise RuntimeError("Failed to index vectors to Qdrant")
+
+
+def embed_query(query: str) -> list[float]:
+    embedder = get_text_embedder()
+    dimension = get_dimension(384)
+
+    try:
+        vec = embedder.encode(query)
+
+        if hasattr(vec, "tolist"):
+            vec = vec.tolist()
+        # 处理嵌套列表情况
+        if isinstance(vec, list) and vec and isinstance(vec[0], (list, tuple)):
+            vec = vec[0]  # Extract first vector if nested
+
+        result = [float(x) for x in vec]
+
+        if len(result) != dimension:
+            print(f"[WARNING] Query向量维度异常: 期望{dimension}, 实际{len(result)}")
+            # 用零向量填充或截断
+            if len(result) < dimension:
+                result.extend([0.0] * (dimension - len(result)))
+            else:
+                result = result[:dimension]
+
+        return result
+    except Exception as e:
+        print(f"[WARNING] Query embedding failed: {e}")
+        # Return zero vector as fallback
+        return [0.0] * dimension
+
+
+def search_vectors(
+    store: QdrantVectorStore | None,
+    query: str = "",
+    top_k: int = 8,
+    rag_namespace: str = None | None,
+    only_rag_data: bool = True,
+    score_threshold: float = None | None,
+) -> list[dict]:
+    """
+    Search RAG vectors using unified embedding and Qdrant.
+    """
+
+    if not query:
+        return []
+
+    if store is None:
+        store = _create_default_vector_store()
+
+    qv = embed_query(query)
+
+    where = {"memory_type": "rag_chunk"}
+
+    if only_rag_data:
+        where["is_rag_data"] = True
+        where["data_source"] = "rag_pipline"
+    if rag_namespace:
+        where["rag_namespace"] = rag_namespace
+
+    try:
+        return store.search_similar(query_vector=qv, limit=limit, score_threshold=score_threshold, where=where)
+    except Exception as e:
+        print(f"[WARNING] RAG search failed: {e}")
+        return []
+
+
+def _prompt_mqe(query: str, n: int) -> list[str]:
+    try:
+        llm = OpenAICompatibleClient(mode="qwen3.5:0.8b")
+        prompt = [
+            {"role": "user", "content": f"原始查询{query}\n 请给出{n}个不同表述的查询，但是语义需要相同，每行一个"}
+        ]
+
+        _, text = llm.generate(
+            prompt,
+            "你是检索查询扩展助手。生成语义等价或互补的多样化查询。必须和用户输入的语言一致，简短精炼，避免标点。",
+        )
+
+        lines = [ln.strip("- \t") for ln in (text or "").splitlines()]
+
+        outs = [ln for ln in lines if ln]
+
+        return outs[:n] or [query]
+    except Exception:
+        return [query]
+
+
+def search_vectors_expanded(
+    store: QdrantVectorStore = None,
+    query: str = "",
+    top_k: int = 8,
+    rag_namespace: str | None = None,
+    only_rag_data: bool = True,
+    score_threshold: float | None = None,
+    enable_mqe: bool = False,
+    mqe_expansions: int = 2,
+    enable_hyde: bool = False,
+    candidate_pool_multiplier: int = 4,
+) -> list[dict]:
+    """
+    Search with query expansion using unified embedding and Qdrant.
+    """
+
+    if not query:
+        return []
+
+    if store is None:
+        store = _create_default_vector_store()
+
+    expansions = list[str] = [query]
+
+    if enable_mqe and mqe_expansions > 0:
+        expansions.extend(_prompt_mqe(query, mqe_expansions))
+
+    if enable_hyde:
+        text = _prompt_hyde(query=query)
+        if text:
+            expansions.append(text)
+
+    uniq: list[str] = []
+
+    for e in expansions:
+        if e and e not in uniq:
+            uniq.append(e)
+
+    expansions = uniq[: max(1, len(uniq))]
+
+    pool = max(top_k * candidate_pool_multiplier, 20)
+    per = max(1, pool // max(1, expansions))
+
+    where = {"memory_type": "rag_chunk"}
+    if only_rag_data:
+        where["is_rag_data"] = True
+        where["data_source"] = "rag_pipline"
+    if rag_namespace:
+        where["rag_namespace"] = rag_namespace
+
+    agg = dict[str, dict] = {}
+
+    for q in expansions:
+        qv = embed_query(q)
+
+        hits = store.search_similar(query_vector=qv, limit=per, score_threshold=score_threshold, where=where)
+
+        for h in hits:
+            mid = h.get("metadata", {}).get("memory_id", h.get("id"))
+            s = float(h.get("score", 0.0))
+
+            if mid not in agg or s > float(agg[mid].get("score", 0.0)):
+                agg[mid] = h
+
+    merged = list(agg.values())
+
+    merged.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
+
+    return merged[:top_k]
+
+
+def _prompt_hyde(query: str) -> str | None:
+    try:
+        llm = OpenAICompatibleClient(mode="qwen3.5:0.8b")
+
+        prompt = [{"role": "user", "content": f"问题：{query}\n 请直接写一段中等长度、客观、包含关键术语的段落。"}]
+
+        _, text = llm.generate(
+            messages=prompt,
+            system_prompt="根据用户问题，先写一段可能的答案性段落，用于向量检索的查询文档（不要分析过程）。",
+        )
+
+        return text
+    except Exception:
+        return None
 
 
 def create_rag_pipeline(
@@ -392,7 +702,7 @@ def create_rag_pipeline(
         distance="cosine",
     )
 
-    def add_documents(file_path: list[str], chunk_size: int = 800, chunk_overlap: int = 100):
+    def add_documents(file_path: list[str], chunk_size: int = 800, chunk_overlap: int = 100) -> int:
         chunks = load_and_chunk_texts(
             paths=file_path,
             chunk_size=chunk_size,
@@ -401,7 +711,42 @@ def create_rag_pipeline(
             source_label="rag",
         )
 
+        index_chunks(chunks=chunks, store=store, rag_namespace=rag_namespace)
+
+        return len(chunks)
+
+    def search(query: str, top_k: int = 8, score_threshold: float = None | None):
+        return search_vectors(
+            store=store, query=query, top_k=top_k, rag_namespace=rag_namespace, score_threshold=score_threshold
+        )
+
+    def search_advanced(
+        query: str,
+        top_k: int = 8,
+        enable_mqe: bool = False,
+        enable_hyde: bool = False,
+        score_threshold: float | None = None,
+    ):
+        """Advanced search with query expansion"""
+        return search_vectors_expanded(
+            store=store,
+            query=query,
+            top_k=top_k,
+            rag_namespace=rag_namespace,
+            enable_hyde=enable_hyde,
+            enable_mqe=enable_mqe,
+            score_threshold=score_threshold,
+        )
+
+    def get_stats():
+        """Get pipeline statistics"""
+        return store.get_collection_stats()
+
     return {
         "store": store,
         "namespace": rag_namespace,
+        "add_documents": add_documents,
+        "search": search,
+        "search_advanced": search_advanced,
+        "get_stats": get_stats,
     }
