@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from itertools import count
 from typing import Any
 
+from numpy import sort
+
 from ..base import BaseMemoroy, MemoryConfig, MemoryItem, MemoryType
 
 
@@ -236,7 +238,7 @@ class WorkingMemory(BaseMemoroy):
         current_time = datetime.now()
 
         to_remove = []
-
+        # 始终先执行TTL过期（分钟级）
         cutoff_ttl = current_time - timedelta(minutes=self.max_age_min)
 
         for memory in self.memories:
@@ -248,10 +250,17 @@ class WorkingMemory(BaseMemoroy):
                 if memory.importance < threshold:
                     to_remove.append(memory.id)
 
-        if strategy == "time_based":
+        elif strategy == "time_based":
             cutoff_time = current_time - timedelta(hours=max_age_days * 24)
             for memory in self.memories:
                 if memory.timestamp < cutoff_time:
+                    to_remove.append(memory.id)
+        elif strategy == "capacity_based":
+            if len(self.memories) > self.max_cap:
+                sorted_memories = sorted(self.memories, key=lambda m: self._calculate_priority(m))
+                excess_count = len(sorted_memories) - self.max_cap
+
+                for memory in sorted_memories[:excess_count]:
                     to_remove.append(memory.id)
 
         for memory_id in to_remove:

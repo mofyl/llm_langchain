@@ -3,6 +3,8 @@ import time
 from types import Any
 from typing import Optional
 
+from openai import file_from_path
+
 from chapter1.open_ai_provider import OpenAICompatibleClient
 from memory.rag.pipline import create_rag_pipeline
 
@@ -293,6 +295,54 @@ class RAGTool(Tool):
         except Exception as e:
             return f"❌ 搜索失败: {str(e)}"
 
+    def _clean_content_for_context(self, content: str) -> str:
+        """清理内容用于上下文"""
+        # 移除过多的换行和空格
+        content = " ".join(content.split())
+        # 截断过长内容
+        if len(content) > 300:
+            content = content[:300] + "..."
+        return content
+
+    def _smart_truncate_context(self, context: str, max_chars: int) -> str:
+        """智能截断上下文，保持段落完整性"""
+        if len(context) <= max_chars:
+            return context
+
+        # 寻找最近的段落分隔符
+        truncated = context[:max_chars]
+        last_break = truncated.rfind("\n\n")
+
+        if last_break > max_chars * 0.7:  # 如果断点位置合理
+            return truncated[:last_break] + "\n\n[...更多内容被截断]"
+        else:
+            return truncated[: max_chars - 20] + "...[内容被截断]"
+
+    def _build_system_prompt(self) -> str:
+        """构建系统提示词"""
+        return (
+            "你是一个专业的知识助手，具备以下能力：\n"
+            "1. 📖 精准理解：仔细理解用户问题的核心意图\n"
+            "2. 🎯 可信回答：严格基于提供的上下文信息回答，不编造内容\n"
+            "3. 🔍 信息整合：从多个片段中提取关键信息，形成完整答案\n"
+            "4. 💡 清晰表达：用简洁明了的语言回答，适当使用结构化格式\n"
+            "5. 🚫 诚实表达：如果上下文不足以回答问题，请坦诚说明\n\n"
+            "回答格式要求：\n"
+            "• 直接回答核心问题\n"
+            "• 必要时使用要点或步骤\n"
+            "• 引用关键原文时使用引号\n"
+            "• 避免重复和冗余"
+        )
+
+    def _build_user_prompt(self, question: str, context: str) -> str:
+        """构建用户提示词"""
+        return (
+            f"请基于以下上下文信息回答问题：\n\n"
+            f"【问题】{question}\n\n"
+            f"【相关上下文】\n{context}\n\n"
+            f"【要求】请提供准确、有帮助的回答。如果上下文信息不足，请说明需要什么额外信息。"
+        )
+
     @tool_action("rag_ask", "基于知识库进行智能问答")
     def _ask(
         self,
@@ -323,6 +373,110 @@ class RAGTool(Tool):
         4. LLM生成准确答案
         5. 添加引用来源
         """
+        try:
+            if not question or not question.strip():
+                return "❌ 请提供要询问的问题"
+
+            user_question = question.strip()
+            print(f"🔍 智能问答: {user_question}")
+
+            pipeline = self._get_pipline(namespace=namespace)
+            search_start = time.time()
+
+            if enable_advanced_search:
+                results = pipeline["search_advanced"](
+                    query=user_question,
+                    top_k=limit,
+                    enable_mqe=True,
+                    enable_hyde=True,
+                )
+            else:
+                results = pipeline["search"](query=user_question, top_k=limit)
+
+            search_time = int((time.time() - search_start) * 1000)
+
+            if not results:
+                return (
+                    f"🤔 抱歉，我在知识库中没有找到与「{user_question}」相关的信息。\n\n"
+                    f"💡 建议：\n"
+                    f"• 尝试使用更简洁的关键词\n"
+                    f"• 检查是否已添加相关文档\n"
+                    f"• 使用 stats 操作查看知识库状态"
+                )
+
+            context_parts = []
+
+            citations = []
+            total_score = 0
+
+            for i, result in enumerate(results):
+                meta = result.get("metadata", {})
+                content = meta.get("content", "").strip()
+                source = meta.get("source_path", "unknown")
+                score = result.get("score", 0.0)
+                total_score += score
+
+                if content:
+                    cleaned_content = self._clean_content_for_context(content=content)
+                    context_parts.append(f"片段 {i + 1}：{cleaned_content}")
+
+                    if include_citations:
+                        citations.append({"index": i + 1, "source": os.path.basename(source), "score": score})
+
+            context = "\n\n".join(context_parts)
+
+            if len(context) > max_chars:
+                context = self._smart_truncate_context(context, max_chars)
+
+            system_prompt = self._build_system_prompt()
+            user_prompt = self._build_user_prompt(user_question, context=content)
+
+            # enhanced_prompt = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+
+            llm_start = time.time()
+            answer = self.llm.generate([user_prompt], system_prompt)
+            llm_time = int((time.time() - llm_start) * 1000)
+
+            if not answer or not answer.strip():
+                return "❌ LLM未能生成有效答案，请稍后重试"
+
+            return self._format_final_answer(
+                question=question,
+                answer=answer,
+                citations=citations,
+                search_time=search_time,
+                llm_time=llm_time,
+                avg_score=total_score / len(results) if results else 0,
+            )
+
+        except Exception as e:
+            return f"❌ 智能问答失败: {str(e)}\n💡 请检查知识库状态或稍后重试"
+
+    def _format_final_answer(
+        self,
+        question: str,
+        answer: str,
+        citations: list[dict] | None = None,
+        search_time: int = 0,
+        llm_time: int = 0,
+        avg_score: float = 0,
+    ) -> str:
+        """格式化最终答案"""
+        result = ["🤖 **智能问答结果**\n"]
+
+        result.append(answer)
+
+        if citations:
+            result.append("\n\n📚 **参考来源**")
+            for citation in citations:
+                score_emoji = "🟢" if citation["score"] > 0.8 else "🟡" if citation["score"] > 0.6 else "🔵"
+                result.append(
+                    f"{score_emoji} [{citation['index']}] {citation['source']} (相似度: {citation['score']:.3f})"
+                )
+        # 添加性能信息（调试模式）
+        result.append(f"\n⚡ 检索: {search_time}ms | 生成: {llm_time}ms | 平均相似度: {avg_score:.3f}")
+
+        return "\n".join(result)
 
     def run(self, parameters: dict[str, Any]) -> str:
         """执行工具（非展开模式）
@@ -335,3 +489,52 @@ class RAGTool(Tool):
         """
         if not self.validate_parameters(parameters=parameters):
             return "❌ 参数验证失败：缺少必需的参数"
+
+        if not self.initialized:
+            return f"❌ RAG工具未正确初始化，请检查配置: {getattr(self, 'init_error', '未知错误')}"
+
+        action = parameters.get("action")
+
+        try:
+            if action == "add_document":
+                self._add_document(
+                    file_path=parameters.get("file_path"),
+                    document_id=parameters.get("document_id"),
+                    namespace=parameters.get("namespace", "default"),
+                    chunk_size=parameters.get("chunk_size", 800),
+                    chunk_over_lap=parameters.get("chunk_over_lap", 100),
+                )
+            elif action == "add_text":
+                return self._add_text(
+                    text=parameters.get("text"),
+                    document_id=parameters.get("document_id"),
+                    namespace=parameters.get("namespace", "default"),
+                    chunk_size=parameters.get("chunk_size", 800),
+                    chunk_overlap=parameters.get("chunk_overlap", 100),
+                )
+            elif action == "ask":
+                question = parameters.get("question") or parameters.get("query")
+                return self._ask(
+                    question=question,
+                    limit=parameters.get("limit", 5),
+                    enable_advanced_search=parameters.get("enable_advanced_search", True),
+                    include_citations=parameters.get("include_citations", True),
+                    max_chars=parameters.get("max_chars", 1200),
+                    namespace=parameters.get("namespace", "default"),
+                )
+            elif action == "search":
+                return self._search(
+                    query=parameters.get("query") or parameters.get("question"),
+                    limit=parameters.get("limit", 5),
+                    min_score=parameters.get("min_score", 0.1),
+                    enable_advanced_search=parameters.get("enable_advanced_search", True),
+                    max_chars=parameters.get("max_chars", 1200),
+                    include_citations=parameters.get("include_citations", True),
+                    namespace=parameters.get("namespace", "default"),
+                )
+            elif action == "stats":
+                return self._get_stats(namespace=parameters.get("namespace", "default"))
+            else:
+                return f"❌ 不支持的操作: {action}"
+        except Exception as e:
+            return f"❌ 执行操作 '{action}' 时发生错误: {str(e)}"
