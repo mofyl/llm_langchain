@@ -22,7 +22,7 @@ except ModuleNotFoundError:
 
 
 async def demo_simple_agent_with_memory():
-    llm = OpenAICompatibleClient(mode="qwen3.5:0.8b", url="127.0.0.1:11434")
+    llm = OpenAICompatibleClient(mode="qwen3.5:0.8b")
 
     memory_tool = MemoryTool(user_id="demo_user_001", memory_type=[MemoryType.WORKINGMEMORY])
 
@@ -74,5 +74,9 @@ def main():
     asyncio.run(demo_simple_agent_with_memory())
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     # main()
+
+#     from django.core.management.utils import get_random_secret_key
+
+#     print(get_random_secret_key())

@@ -1,7 +1,7 @@
+import asyncio
 import os
 import time
-from types import Any
-from typing import Optional
+from typing import Any, Optional
 
 from openai import file_from_path
 
@@ -15,14 +15,14 @@ class RAGTool(Tool):
     def __init__(
         self,
         knowledge_base_path: str = "./knowledge_base",
-        qdrant_url: str = None,
-        qdrant_api_key: str = None,
+        qdrant_url: str | None = None,
+        qdrant_api_key: str | None = None,
         collection_name: str = "rag_knowledge_base",
         rag_namespace: str = "default",
         expandable: bool = True,
     ):
         super().__init__(
-            name="rag", description="RAG工具 - 支持多格式文档检索增强生成，提供智能问答能力", expandable=expandable
+            name="rag", desc="RAG工具 - 支持多格式文档检索增强生成，提供智能问答能力", expandable=expandable
         )
 
         self.knowledge_base_path = knowledge_base_path
@@ -118,7 +118,7 @@ class RAGTool(Tool):
     def _add_document(
         self,
         file_path: str,
-        document_id: str = None,
+        document_id: str | None = None,
         namespace: str = "default",
         chunk_size: int = 800,
         chunk_overlap: int = 100,
@@ -171,7 +171,7 @@ class RAGTool(Tool):
     def _add_text(
         self,
         text: str,
-        document_id: str = None,
+        document_id: str | None = None,
         namespace: str = "default",
         chunk_size: int = 800,
         chunk_overlap: int = 100,
@@ -429,12 +429,17 @@ class RAGTool(Tool):
                 context = self._smart_truncate_context(context, max_chars)
 
             system_prompt = self._build_system_prompt()
-            user_prompt = self._build_user_prompt(user_question, context=content)
+            user_prompt = self._build_user_prompt(user_question, context=context)
 
             # enhanced_prompt = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
 
             llm_start = time.time()
-            answer = self.llm.generate([user_prompt], system_prompt)
+            _, answer = asyncio.run(
+                self.llm.generate(
+                    [{"role": "user", "content": user_prompt}],
+                    system_prompt,
+                )
+            )
             llm_time = int((time.time() - llm_start) * 1000)
 
             if not answer or not answer.strip():
@@ -478,7 +483,7 @@ class RAGTool(Tool):
 
         return "\n".join(result)
 
-    def run(self, parameters: dict[str, Any]) -> str:
+    def run(self, param: dict[str, Any]) -> str:
         """执行工具（非展开模式）
 
         Args:
@@ -487,54 +492,55 @@ class RAGTool(Tool):
         Returns:
             执行结果字符串
         """
-        if not self.validate_parameters(parameters=parameters):
+        if not self.validate_parameters(parameters=param):
             return "❌ 参数验证失败：缺少必需的参数"
 
         if not self.initialized:
             return f"❌ RAG工具未正确初始化，请检查配置: {getattr(self, 'init_error', '未知错误')}"
 
-        action = parameters.get("action")
+        action = param.get("action")
 
         try:
             if action == "add_document":
                 self._add_document(
-                    file_path=parameters.get("file_path"),
-                    document_id=parameters.get("document_id"),
-                    namespace=parameters.get("namespace", "default"),
-                    chunk_size=parameters.get("chunk_size", 800),
-                    chunk_over_lap=parameters.get("chunk_over_lap", 100),
+                    file_path=param.get("file_path"),
+                    document_id=param.get("document_id"),
+                    namespace=param.get("namespace", "default"),
+                    chunk_size=param.get("chunk_size", 800),
+                    chunk_over_lap=param.get("chunk_over_lap", 100),
                 )
             elif action == "add_text":
                 return self._add_text(
-                    text=parameters.get("text"),
-                    document_id=parameters.get("document_id"),
-                    namespace=parameters.get("namespace", "default"),
-                    chunk_size=parameters.get("chunk_size", 800),
-                    chunk_overlap=parameters.get("chunk_overlap", 100),
+                    text=param.get("text"),
+                    document_id=param.get("document_id"),
+                    namespace=param.get("namespace", "default"),
+                    chunk_size=param.get("chunk_size", 800),
+                    chunk_overlap=param.get("chunk_overlap", 100),
                 )
             elif action == "ask":
-                question = parameters.get("question") or parameters.get("query")
+                question = param.get("question") or param.get("query")
                 return self._ask(
                     question=question,
-                    limit=parameters.get("limit", 5),
-                    enable_advanced_search=parameters.get("enable_advanced_search", True),
-                    include_citations=parameters.get("include_citations", True),
-                    max_chars=parameters.get("max_chars", 1200),
-                    namespace=parameters.get("namespace", "default"),
+                    limit=param.get("limit", 5),
+                    enable_advanced_search=param.get("enable_advanced_search", True),
+                    include_citations=param.get("include_citations", True),
+                    max_chars=param.get("max_chars", 1200),
+                    namespace=param.get("namespace", "default"),
                 )
             elif action == "search":
                 return self._search(
-                    query=parameters.get("query") or parameters.get("question"),
-                    limit=parameters.get("limit", 5),
-                    min_score=parameters.get("min_score", 0.1),
-                    enable_advanced_search=parameters.get("enable_advanced_search", True),
-                    max_chars=parameters.get("max_chars", 1200),
-                    include_citations=parameters.get("include_citations", True),
-                    namespace=parameters.get("namespace", "default"),
+                    query=param.get("query") or param.get("question"),
+                    limit=param.get("limit", 5),
+                    min_score=param.get("min_score", 0.1),
+                    enable_advanced_search=param.get("enable_advanced_search", True),
+                    max_chars=param.get("max_chars", 1200),
+                    include_citations=param.get("include_citations", True),
+                    namespace=param.get("namespace", "default"),
                 )
-            elif action == "stats":
-                return self._get_stats(namespace=parameters.get("namespace", "default"))
+            # elif action == "stats":
+            #     return self._get_stats(namespace=parameters.get("namespace", "default"))
             else:
                 return f"❌ 不支持的操作: {action}"
         except Exception as e:
             return f"❌ 执行操作 '{action}' 时发生错误: {str(e)}"
+        return f"❌ 不支持的操作: {action}"

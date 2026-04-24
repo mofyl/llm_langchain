@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from typing import Any
 
 from memory import MemoryConfig, MemoryType
@@ -11,9 +11,9 @@ class MemoryTool(Tool):
     def __init__(
         self,
         user_id: str = "default_user",
-        memory_config: MemoryConfig = None,
-        memory_type: list[MemoryType] = None,
-        memoty_type: list[MemoryType] = None,
+        memory_config: MemoryConfig | None = None,
+        memory_type: list[MemoryType] | None = None,
+        memoty_type: list[MemoryType] | None = None,
         expandable: bool = False,
     ):
         super().__init__(name="memory", desc="记忆工具 - 可以存储和检索对话历史、知识和经验", expandable=expandable)
@@ -34,29 +34,31 @@ class MemoryTool(Tool):
         self.current_session_id = None
         self.conversation_count = 0
 
-    def run(self, parameters: dict[str, Any]) -> str:
-        if not self.validate_parameters(parameters=parameters):
+    def run(self, param: dict[str, Any]) -> str:
+        if not self.validate_parameters(parameters=param):
             return "参数验证失败"
 
-        action = parameters.get("action")
+        action = param.get("action")
 
         if action == "add":
             return self._add_memory(
-                content=parameters.get("content", ""),
-                memory_type=parameters.get("memory_type", "working"),
-                importance=parameters.get("importance", 0.5),
-                file_path=parameters.get("file_path"),
-                modality=parameters.get("modality"),
+                content=param.get("content", ""),
+                memory_type=param.get("memory_type", "working"),
+                importance=param.get("importance", 0.5),
+                file_path=param.get("file_path"),
+                modality=param.get("modality"),
             )
-        if action == "search":
+        elif action == "search":
             return self._search_memory(
-                query=parameters.get("query"),
-                limit=parameters.get("limit", 5),
-                memory_type=parameters.get("memory_type"),
-                min_importance=parameters.get("min_importance", 0.1),
+                query=param.get("query"),
+                limit=param.get("limit", 5),
+                memory_type=param.get("memory_type"),
+                min_importance=param.get("min_importance", 0.1),
             )
-        if action == "summary":
-            return self._get_summary(limit=parameters.get("limit", 10))
+        elif action == "summary":
+            return self._get_summary(limit=param.get("limit", 10))
+        else:
+            return f"❌ 不支持的操作: {action}"
 
     def get_parameters(self) -> list[ToolParameter]:
         return [
@@ -152,8 +154,8 @@ class MemoryTool(Tool):
         content: str = "",
         memory_type: MemoryType = MemoryType.WORKINGMEMORY,
         importance: float = 0.5,
-        file_path: str = None,
-        modality: str = None,
+        file_path: str | None = None,
+        modality: str | None = None,
     ):
         """添加记忆
 
@@ -195,7 +197,7 @@ class MemoryTool(Tool):
 
     @tool_action("memory_search", "搜索相关记忆")
     def _search_memory(
-        self, query: str, limit: int = 5, memory_type: MemoryType = None, min_importance: float = 0.1
+        self, query: str, limit: int = 5, memory_type: MemoryType | None = None, min_importance: float = 0.1
     ) -> str:
         """搜索记忆
 
@@ -209,9 +211,11 @@ class MemoryTool(Tool):
             搜索结果
         """
         try:
-            memory_type = [memory_type] if memory_type else None
+            memory_types = [memory_type] if memory_type else None
 
-            result = self.memory_manager.retrieve_memories(query=query, limit=limit, memory_types=self.memory_types)
+            result = self.memory_manager.retrieve_memories(
+                query=query, limit=limit, memory_types=memory_types, min_importance=min_importance
+            )
 
             if not result:
                 return f"未找到与 '{query}' 相关的记忆"

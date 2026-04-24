@@ -7,7 +7,7 @@ from typing import Any, get_type_hints
 from pydantic import BaseModel
 
 
-def tool_action(name: str = None, description: str = None):
+def tool_action(name: str | None = None, description: str | None = None):
     """装饰器：标记一个方法为可展开的工具 action
 
     用法:
@@ -101,7 +101,7 @@ class Tool(ABC):
 class AutoGenTool(Tool):
     """自动生成的工具 - 从方法签名和 docstring 自动提取参数"""
 
-    def __init__(self, parent: Tool, method: Callable, name: str = None, desc: str = None):
+    def __init__(self, parent: Tool, method: Callable, name: str | None = None, desc: str | None = None):
         """初始化自动生成的工具
 
         Args:

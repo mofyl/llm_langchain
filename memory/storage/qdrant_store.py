@@ -31,8 +31,8 @@ class QdrantConnectionManager:
     @classmethod
     def get_instance(
         cls,
-        url: str = None | None,
-        api_key: str = None | None,
+        url: str | None = None,
+        api_key: str | None = None,
         collection_name: str = "hello_agents_vectors",
         vector_size: int = 384,
         distance: str = "cosine",
@@ -97,7 +97,7 @@ class QdrantVectorStore:
 
         self.search_ef = 128
 
-        self.search_exact = "1"
+        self.search_exact = True
 
         distance_map = {"cosine": Distance.COSINE, "dot": Distance.DOT, "euclidean": Distance.EUCLID}
 
@@ -117,6 +117,8 @@ class QdrantVectorStore:
 
     def _ensure_collection(self):
         """确保集合存在，不存在则创建"""
+        if self.client is None:
+            raise Exception("连接不存在")
         try:
             collections = self.client.get_collections().collections
 
@@ -153,6 +155,8 @@ class QdrantVectorStore:
             raise
 
     def _ensure_payload_indexes(self):
+        if self.client is None:
+            raise Exception("连接不存在")
         try:
             index_fields = [
                 ("memory_type", models.PayloadSchemaType.KEYWORD),
@@ -194,7 +198,8 @@ class QdrantVectorStore:
         Returns:
             bool: 是否成功
         """
-
+        if self.client is None:
+            raise Exception("连接不存在")
         try:
             if not vectors:
                 logger.warning("⚠️ 向量列表为空")
@@ -209,7 +214,7 @@ class QdrantVectorStore:
             )
 
             points = []
-            time_now = datetime.now().timestamp
+            time_now = datetime.now().timestamp()
             for i, (vector, meta, point_id) in enumerate(zip(vectors, metadata, ids)):
                 try:
                     vlen = len(vector)
@@ -262,8 +267,8 @@ class QdrantVectorStore:
         self,
         query_vector: list[float],
         limit: int = 10,
-        score_threshold: float = None | None,
-        where: dict[str, Any] = None | None,
+        score_threshold: float | None = None,
+        where: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
         搜索相似向量
@@ -277,6 +282,8 @@ class QdrantVectorStore:
         Returns:
             List[Dict]: 搜索结果
         """
+        if self.client is None:
+            raise Exception("连接不存在")
         try:
             if len(query_vector) != self.vector_size:
                 logger.error(f"❌ 查询向量维度错误: 期望{self.vector_size}, 实际{len(query_vector)}")
@@ -290,7 +297,6 @@ class QdrantVectorStore:
                 for key, value in where.items():
                     if isinstance(value, (str, int, float, bool)):
                         conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
-
                 if conditions:
                     query_filter = Filter(must=conditions)
 
@@ -313,18 +319,9 @@ class QdrantVectorStore:
                     search_params=search_params,
                 )
                 search_result = response.points
-            except AttributeError:
-                # 回退到旧API (qdrant-client < 1.16.0)
-                search_result = self.client.search(
-                    collection_name=self.collection_name,
-                    query_vector=query_vector,
-                    query_filter=query_filter,
-                    limit=limit,
-                    score_threshold=score_threshold,
-                    with_payload=True,
-                    with_vectors=False,
-                    search_params=search_params,
-                )
+            except Exception as e:
+                logger.error(f"❌ Qdrant搜索请求失败: {e}")
+                return []
 
             results = []
 
@@ -347,7 +344,8 @@ class QdrantVectorStore:
         Returns:
             bool: 是否成功
         """
-
+        if self.client is None:
+            raise Exception("连接不存在")
         try:
             if not ids:
                 return True
@@ -367,6 +365,34 @@ class QdrantVectorStore:
             logger.error(f"❌ 删除向量失败: {e}")
             return False
 
+    def delete_memories(self, memory_ids: list[str]):
+        """
+        删除指定记忆（通过payload中的 memory_id 过滤删除）
+
+        注意：由于写入时可能将非UUID的点ID转换为UUID，这里不再依赖点ID，
+        而是通过payload中的memory_id来匹配删除，确保一致性。
+        """
+
+        try:
+            if not memory_ids:
+                return
+            if self.client is None:
+                return
+
+            conditions = [FieldCondition(key="memory_id", match=MatchValue(value=mid)) for mid in memory_ids]
+
+            query_filter = Filter(should=conditions)
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=query_filter),
+                wait=True,
+            )
+            logger.info(f"✅ 成功按memory_id删除 {len(memory_ids)} 个Qdrant向量")
+
+        except Exception as e:
+            logger.error(f"❌ 删除记忆失败: {e}")
+            raise
+
     def get_collection_info(self) -> dict[str, Any]:
         """
         获取集合信息
@@ -374,12 +400,14 @@ class QdrantVectorStore:
         Returns:
             Dict: 集合信息
         """
+        if self.client is None:
+            raise Exception("连接不存在")
         try:
             collection_info = self.client.get_collection(self.collection_name)
 
             info = {
                 "name": self.collection_name,
-                "vectors_count": collection_info.vectors_count,
+                "vectors_count": collection_info.indexed_vectors_count,
                 "indexed_vectors_count": collection_info.indexed_vectors_count,
                 "points_count": collection_info.points_count,
                 "segments_count": collection_info.segments_count,

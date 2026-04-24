@@ -11,6 +11,8 @@ class MemoryType(str, enum.Enum):
     WORKINGMEMORY = "working"
     LONGTERMMEMORY = "long_term"
     SENSORYMEMORY = "sensory"
+    EPISODICMEMORY = "episodic"
+    DOCUMENT = "document"
 
 
 # @dataclass
@@ -34,7 +36,6 @@ class MemoryItem(BaseModel):
     content: str
     memory_type: MemoryType
     user_id: str
-    session_id: str
     timestamp: datetime
     importance: float = 0.5
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -59,7 +60,7 @@ class BaseMemoroy(ABC):
     def __init__(self, config: MemoryConfig, storage_backend=None):
         self.config = config
         self.storage = storage_backend
-        self.memory_type: MemoryType = self.__class__.__name__.lower().replace("memory", "")
+        self.memory_type: MemoryType = MemoryType(self.__class__.__name__.lower().replace("memory", ""))
 
     @abstractmethod
     def add(self, memory_item: MemoryItem) -> str:
@@ -89,8 +90,12 @@ class BaseMemoroy(ABC):
 
     @abstractmethod
     def update(
-        self, memory_id: str, content: str = None, importance: float = None, metadata: dict[str, Any] = None
-    ) -> str:
+        self,
+        memory_id: str,
+        content: str | None = None,
+        importance: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
         """更新记忆
 
         Args:
