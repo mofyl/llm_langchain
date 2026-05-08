@@ -1,5 +1,10 @@
 from importlib import import_module
 
+from .base import AutoGenTool, Tool, ToolParameter, tool_action
+from .memory_tool import MemoryConfig, MemoryManager, MemoryTool, MemoryType
+from .registry import ToolRegistry
+from .terminal_tool import TerminalTool
+
 
 def __getattr__(name: str):
     if name in {"Tool", "ToolParameter", "tool_action", "AutoGenTool"}:
@@ -12,4 +17,15 @@ def __getattr__(name: str):
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-__all__ = ["Tool", "ToolParameter", "tool_action", "AutoGenTool", "ToolRegistry", "MemoryTool"]
+__all__ = [
+    "Tool",
+    "ToolParameter",
+    "tool_action",
+    "AutoGenTool",
+    "ToolRegistry",
+    "MemoryTool",
+    "MemoryManager",
+    "MemoryConfig",
+    "MemoryType",
+    "TerminalTool",
+]

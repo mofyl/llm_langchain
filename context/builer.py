@@ -112,6 +112,9 @@ class ContextBuilder:
         structured_context = self._structure(
             selected_packets=selected_packets, user_query=user_query, system_instructions=system_instructions
         )
+        # 4. Compress: 压缩与规范化（如果超预算）
+        result = self._compress(structured_context)
+        return result
 
     def _gather(
         self,
@@ -304,7 +307,7 @@ class ContextBuilder:
             f"7.输出总 token 数不超过 {available_tokens}"
         )
 
-        for i in range(4):
+        for _ in range(4):
             _, result = asyncio.run(self.llm.generate(messages=[{"user": result}], system_prompt=system_prompt))
             if result is None:
                 return context

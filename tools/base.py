@@ -87,7 +87,7 @@ class Tool(ABC):
 
         for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
             if hasattr(method, "_is_tool_action"):
-                tool = AutoGenTool(parent=self, method=method, name=method._tool_name, desc=method._tool_description)
+                tool = AutoGenTool(parent=self, method=method, name=method.__tool_name, desc=method._tool_description)
                 tools.append(tool)
 
         return tools if tools else None
@@ -223,3 +223,11 @@ class AutoGenTool(Tool):
         }
 
         return type_map.get(py_type, "string")
+
+    def get_parameters(self) -> list[ToolParameter]:
+        """获取参数列表"""
+        return self._parameters
+
+    def run(self, param: dict[str, Any]) -> str:
+        """执行方法"""
+        return self.method(**param)

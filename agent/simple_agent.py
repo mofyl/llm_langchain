@@ -1,19 +1,17 @@
 import asyncio
 import re
 
+from core import Config, HelloAgentsLLM, Message, RoleType
 from tools.registry import ToolRegistry
 
-from .agent.base import Agent
-from .config import Config
-from .message import Message, RoleType
-from .open_ai_provider import OpenAICompatibleClient
+from .base import Agent
 
 
 class SimpleAgent(Agent):
     def __init__(
         self,
         name: str,
-        llm: OpenAICompatibleClient,
+        llm: HelloAgentsLLM,
         system_prompt: str | None,
         config: Config | None = None,
         tool_registry: ToolRegistry | None = None,
@@ -74,9 +72,8 @@ class SimpleAgent(Agent):
         message.append({"role": "user", "content": input_text})
 
         if not self.enable_tool_calling:
-            _, resp = asyncio.run(
-                self.llm.generate(messages=message, system_prompt=enhanced_system_prompt, kwargs=kwargs)
-            )
+            resp = self.llm.invoke(messages=message, kwargs=kwargs)
+
             if resp is None:
                 return "未找到"
             self.add_message(message=Message(content=input_text, role=RoleType.USER))
@@ -88,7 +85,7 @@ class SimpleAgent(Agent):
         max_tool_iterations = 4
         while current_iteration < max_tool_iterations:
             print("输入模型：", message)
-            _, resp = asyncio.run(self.llm.generate(messages=message, system_prompt=enhanced_system_prompt, **kwargs))
+            _, resp = self.llm.invoke(messages=message, **kwargs)
             print("模型输出：", resp)
             if resp is None:
                 return final_response
@@ -122,9 +119,7 @@ class SimpleAgent(Agent):
             break
 
         if current_iteration >= max_tool_iterations and not final_response:
-            _, final_response = asyncio.run(
-                self.llm.generate(messages=message, system_prompt=enhanced_system_prompt, **kwargs)
-            )
+            final_response = self.llm.invoke(messages=message, **kwargs)
 
         if final_response is None:
             return "未找到"

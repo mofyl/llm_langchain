@@ -312,27 +312,27 @@ class EpisodicMemory(BaseMemoroy):
 
         return updated or doc_updated
 
-    def remove(self, memory_id: str) -> bool:
-        """删除情景记忆（SQLite + Qdrant）"""
+    # def remove(self, memory_id: str) -> bool:
+    #     """删除情景记忆（SQLite + Qdrant）"""
 
-        removed = False
+    #     removed = False
 
-        for i, ep in enumerate(self.episodes):
-            if ep.episode_id == memory_id:
-                removed_ep = self.episodes.pop(i)
+    #     for i, ep in enumerate(self.episodes):
+    #         if ep.episode_id == memory_id:
+    #             removed_ep = self.episodes.pop(i)
 
-                session_id = removed_ep.session_id
-                if session_id in self.sessoin:
-                    self.sessoin[session_id].remove(memory_id)
-                    # 如果session 已经为空
-                    if not self.sessoin[session_id]:
-                        del self.sessoin[session_id]
-                    removed = True
-                    break
-        doc_deleted = self.doc_store.delete_memory(memory_id=memory_id)
-    
-        try : 
-            self.vector_store.delete_
+    #             session_id = removed_ep.session_id
+    #             if session_id in self.sessoin:
+    #                 self.sessoin[session_id].remove(memory_id)
+    #                 # 如果session 已经为空
+    #                 if not self.sessoin[session_id]:
+    #                     del self.sessoin[session_id]
+    #                 removed = True
+    #                 break
+    #     doc_deleted = self.doc_store.delete_memory(memory_id=memory_id)
+
+    #     try :
+    #         self.vector_store.delete_
 
     # def has_memory(self, memory_id: str) -> bool:
     #     """检查记忆是否存在
